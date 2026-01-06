@@ -279,7 +279,125 @@ This section is not an API design; it is a conceptual mapping from transport con
 - **SIGPIPE can kill the process**: you must prevent it or document how callers must handle it.
 - **Large UDP payloads risk fragmentation**: keep datagrams small when possible.
 
-## 7) Recommended reading (offline-friendly)
+## 7) HTTP/1.1 — Application layer on top of TCP
+
+HTTP/1.1 is an **application-layer** protocol that uses TCP as a byte stream transport. Most practical complexity comes from mapping a structured message protocol onto a stream where reads/writes are partial and boundaries do not exist.
+
+### 7.1 The HTTP message model (bytes, lines, and CRLF)
+HTTP/1.1 messages are sequences of bytes with a line-oriented syntax:
+- Lines are terminated by **CRLF** (`\r\n`), not just `\n`.
+- A message is: **start-line** + **headers** + **empty line** + optional **body**.
+- The header section ends at the first **CRLF CRLF** sequence (`\r\n\r\n`).
+
+Practical implication over TCP:
+- You must parse incrementally: “read until you have enough bytes to decide what comes next”.
+- You must be able to handle headers split across multiple `recv()` calls.
+
+### 7.2 Requests vs responses (start-line)
+**Request line**:
+- Form: `METHOD SP request-target SP HTTP-version CRLF`
+- Examples:
+  - `GET /index.html HTTP/1.1`
+  - `POST /submit HTTP/1.1`
+
+Notes:
+- `METHOD` is an uppercase token in common practice, but the spec treats it as a token.
+- `request-target` is most often **origin-form** (`/path?query`).
+- For proxies you may see **absolute-form** (`http://example.com/path`) and for `CONNECT` you see **authority-form** (`host:port`).
+
+**Status line**:
+- Form: `HTTP-version SP status-code SP reason-phrase CRLF`
+- Example: `HTTP/1.1 200 OK`
+
+Notes:
+- `reason-phrase` is optional/meaningless for program logic; treat it as informational.
+
+### 7.3 Headers: field syntax and important rules
+Each header line is:
+- `field-name ":" OWS field-value OWS CRLF`
+
+Key rules:
+- Header **field names are case-insensitive** (e.g., `Content-Length` == `content-length`).
+- There may be optional whitespace (OWS) around values; be tolerant in parsing.
+- **Obsolete line folding** (`obs-fold`, a header value continuing on the next line starting with SP/HTAB) exists historically but is obsolete and risky; a safe baseline is to **reject** it or treat it strictly.
+
+HTTP/1.1 requires:
+- `Host` header in requests (for origin servers), except in some edge forms; practically: require it for origin-form requests.
+
+### 7.4 When does a message have a body?
+Whether a message has a body depends on method/status and on framing headers:
+- Requests: many methods can have a body, but some common ones typically do not (e.g., `GET`).
+- Responses:
+  - `1xx`, `204`, and `304` responses **do not** have a body.
+  - Responses to `HEAD` **do not** have a body (even if headers imply one).
+
+### 7.5 Body framing: how the receiver knows “where the body ends”
+Because TCP is a stream, HTTP/1.1 needs explicit framing rules. The receiver decides the body length in this order:
+
+1) If `Transfer-Encoding` is present and the final encoding is `chunked`:
+   - The body is a sequence of chunks: `<hex-size>\r\n<bytes>\r\n ... 0\r\n<trailers>\r\n`.
+   - Trailers are additional headers after the terminating `0` chunk (optional).
+
+2) Else if `Content-Length` is present:
+   - The body is exactly that many bytes.
+   - Multiple `Content-Length` headers are ambiguous and dangerous; robust parsers typically **reject** conflicting values.
+
+3) Else if neither applies and the message is allowed to have a body:
+   - The body ends at **connection close** (EOF). This is common in HTTP/1.0 style responses and some error cases.
+
+Security/design note:
+- Conflicting `Transfer-Encoding` and `Content-Length` can lead to request smuggling issues; simplest safe rule is: if `Transfer-Encoding` is present, ignore `Content-Length` (or reject), and handle only supported encodings.
+
+### 7.6 Connection semantics (HTTP/1.1 keep-alive)
+HTTP/1.1 connections are **persistent by default**:
+- Multiple requests/responses can be sent over one TCP connection (sequentially).
+- To close: either side can include `Connection: close`, then close after finishing the current message.
+
+Pipelining (sending multiple requests without waiting for responses) exists in the spec but is widely discouraged in practice. A simple first implementation can assume:
+- At most one in-flight request per connection (no pipelining).
+
+### 7.7 Practical parsing pitfalls (what your library must not assume)
+- `\r\n\r\n` can appear split across reads; delimiter search must work across buffer boundaries.
+- A header section can be large; you need a **maximum header size** to avoid unbounded memory usage.
+- A single `recv()` can contain:
+  - only part of headers,
+  - headers + part of body,
+  - a full message + start of the next message (persistent connections).
+- For `Content-Length`, you must read exactly N bytes even if `recv()` returns fewer.
+- For chunked encoding, chunk boundaries do not align to TCP reads; parsing must be stateful.
+
+### 7.8 Minimal “on the wire” examples
+GET request (no body):
+```
+GET /hello HTTP/1.1\r
+\nHost: example.com\r
+\nUser-Agent: my-client\r
+\n\r
+\n
+```
+
+Response with `Content-Length`:
+```
+HTTP/1.1 200 OK\r
+\nContent-Type: text/plain\r
+\nContent-Length: 5\r
+\n\r
+\nhello
+```
+
+Chunked response (conceptual):
+```
+HTTP/1.1 200 OK\r
+\nTransfer-Encoding: chunked\r
+\n\r
+\n5\r
+\nhello\r
+\n0\r
+\n\r
+\n
+```
+
+## 8) Recommended reading (offline-friendly)
 
 ### man pages (Linux)
 - `man 2 socket`, `connect`, `bind`, `listen`, `accept`, `accept4`
@@ -292,10 +410,12 @@ This section is not an API design; it is a conceptual mapping from transport con
 - TCP: RFC 793 (original TCP specification)
 - UDP: RFC 768
 - Host requirements: RFC 1122 (TCP/IP behavior notes)
+- HTTP/1.1 messaging: RFC 9112 (obsoletes RFC 7230)
+- HTTP semantics: RFC 9110
 
 ### RFCs / docs (deeper, optional)
 - TCP congestion control: RFC 5681
 - TCP retransmission timeout (RTO): RFC 6298
 - TCP window scaling: RFC 7323
 - Path MTU Discovery: RFC 1191 (IPv4), RFC 8201 (IPv6)
-
+- HTTP/1.1 message syntax (older but still widely referenced): RFC 7230
