@@ -1,30 +1,17 @@
 ---
-Checks: >
+Checks: >-
   -*,
   clang-analyzer-*,
   bugprone-*,
+  modernize-*,
   performance-*,
   readability-*,
-  modernize-*,
-  portability-*,
-  cppcoreguidelines-*,
+  misc-*,
+  -modernize-use-trailing-return-type,
   -readability-magic-numbers,
-  -readability-identifier-length,
-  -cppcoreguidelines-avoid-magic-numbers,
-  -cppcoreguidelines-avoid-non-const-global-variables,
-  -cppcoreguidelines-owning-memory,
-  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
-  -modernize-use-trailing-return-type
-
+  -readability-identifier-length
 WarningsAsErrors: ''
-
-HeaderFilterRegex: '^(include|src|examples)/|^main\.cpp$'
-
+HeaderFilterRegex: '^(inc|src)/'
 FormatStyle: file
 
-CheckOptions:
-  - key:             bugprone-narrowing-conversions.WarnOnIntegerNarrowingConversion
-    value:           'true'
-  - key:             modernize-use-nullptr.NullMacros
-    value:           'NULL'
 ...

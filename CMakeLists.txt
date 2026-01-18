@@ -13,9 +13,19 @@ project(network_dev VERSION 0.1.0 LANGUAGES C CXX)
 add_library(net
     src/net/net.cpp
 )
+
+target_compile_options(net PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wconversion
+    -Wsign-conversion
+    -Wshadow
+    -Werror
+)
 target_include_directories(net PUBLIC inc)
 
-add_executable(network_dev main.cpp)
+add_executable(network_dev src/main.cpp)
 target_link_libraries(network_dev PRIVATE net)
 
 include(CTest)

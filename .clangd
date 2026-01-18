@@ -1,14 +1,14 @@
 CompileFlags:
   CompilationDatabase: out/build/local
   Add:
-    - -std=c++23
-    - -Iinc
-
-# If clangd can't find a compilation database for a file (e.g., new files),
-# it will fall back to these flags.
-FallbackFlags:
-  - -std=c++23
-  - -Iinc
+    - -std=gnu++23
+    - -Wall
+    - -Wextra
+    - -Wpedantic
+    - -Wconversion
+    - -Wsign-conversion
+    - -Wshadow
+    - -Werror
 
 Diagnostics:
   UnusedIncludes: Strict
